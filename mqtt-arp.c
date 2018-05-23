@@ -16,6 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
+#include <getopt.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -31,12 +32,18 @@
 
 #include <mosquitto.h>
 
-#define MQTT_HOST "mqtt-host"
-#define MQTT_PORT 8883
-#define MQTT_USERNAME "username"
-#define MQTT_PASSWORD "password"
-#define MQTT_TOPIC "location/by-mac"
-#define LOCATION "home"
+/* Defaults. All overridable from command line. */
+#define MQTT_HOST	"mqtt-host"
+#define MQTT_PORT	8883
+#define MQTT_TOPIC	"location/by-mac"
+#define LOCATION	"home"
+
+/* How often (in seconds) to report that we see a device */
+#define REPORT_INTERVAL	(2 * 60)
+/* How long to wait without seeing a device before reporting it's gone */
+#define EXPIRY_TIME	(10 * 60)
+/* Maximum number of MAC addresses to watch for */
+#define MAX_MACS	8
 
 struct mac_entry {
 	bool valid;
@@ -45,13 +52,18 @@ struct mac_entry {
 	time_t last_reported;
 };
 
-bool debug = false;
-
-struct mac_entry macs[] = {
-	{ true, { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 }, 0, 0 },
-	{ true, { 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff }, 0, 0 },
-	{ false }
+struct ma_config {
+	char *mqtt_host;
+	int mqtt_port;
+	char *mqtt_username;
+	char *mqtt_password;
+	char *mqtt_topic;
+	char *location;
+	char *capath;
+	struct mac_entry macs[MAX_MACS];
 };
+
+bool debug = false;
 
 bool mac_compare(uint8_t *a, uint8_t *b)
 {
@@ -69,7 +81,8 @@ bool mac_compare(uint8_t *a, uint8_t *b)
 	return true;
 }
 
-int mqtt_mac_presence(struct mosquitto *mosq, uint8_t *mac, bool present)
+int mqtt_mac_presence(struct ma_config *config, struct mosquitto *mosq,
+		uint8_t *mac, bool present)
 {
 	char topic[128];
 	int ret;
@@ -79,25 +92,25 @@ int mqtt_mac_presence(struct mosquitto *mosq, uint8_t *mac, bool present)
 	t = time(NULL);
 
 	i = 0;
-	while (macs[i].valid) {
-		if (mac_compare(mac, macs[i].mac))
+	while (i < MAX_MACS && config->macs[i].valid) {
+		if (mac_compare(mac, config->macs[i].mac))
 			break;
 		i++;
 	}
 
-	if (!macs[i].valid)
+	if (i >= MAX_MACS || !config->macs[i].valid)
 		return 0;
 
-	macs[i].last_seen = t;
+	config->macs[i].last_seen = t;
 	/* Report no more often than every 2 minutes */
-	if (present && macs[i].last_reported + 60 * 2 > t)
+	if (present && config->macs[i].last_reported + REPORT_INTERVAL > t)
 		return 0;
 
-	macs[i].last_reported = t;
+	config->macs[i].last_reported = t;
 
 	snprintf(topic, sizeof(topic),
 		"%s/%02X:%02X:%02X:%02X:%02X:%02X",
-		MQTT_TOPIC,
+		config->mqtt_topic,
 		mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
 	if (debug)
@@ -105,7 +118,8 @@ int mqtt_mac_presence(struct mosquitto *mosq, uint8_t *mac, bool present)
 
 	if (present)
 		ret = mosquitto_publish(mosq, NULL, topic,
-				strlen(LOCATION), LOCATION, 0, 0);
+				strlen(config->location), config->location,
+				0, 0);
 	else
 		ret = mosquitto_publish(mosq, NULL, topic,
 				strlen("unknown"), "unknown", 0, 0);
@@ -113,7 +127,7 @@ int mqtt_mac_presence(struct mosquitto *mosq, uint8_t *mac, bool present)
 	return ret;
 }
 
-void prune_macs(struct mosquitto *mosq)
+void prune_macs(struct ma_config *config, struct mosquitto *mosq)
 {
 	time_t t;
 	int i;
@@ -121,12 +135,14 @@ void prune_macs(struct mosquitto *mosq)
 	t = time(NULL);
 
 	i = 0;
-	while (macs[i].valid) {
-		/* Expire after 5 minutes */
-		if (macs[i].last_seen && macs[i].last_seen + 60 * 5 < t) {
-			mqtt_mac_presence(mosq, macs[i].mac, false);
-			macs[i].last_seen = 0;
-			macs[i].last_reported = 0;
+	while (i < MAX_MACS && config->macs[i].valid) {
+		/* Expire if we haven't seen MAC in EXPIRY_TIME */
+		if (config->macs[i].last_seen &&
+				config->macs[i].last_seen + EXPIRY_TIME < t) {
+			mqtt_mac_presence(config, mosq,
+					config->macs[i].mac, false);
+			config->macs[i].last_seen = 0;
+			config->macs[i].last_reported = 0;
 		}
 		i++;
 	}
@@ -139,60 +155,15 @@ void mosq_log_callback(struct mosquitto *mosq, void *userdata, int level,
 		printf("%i:%s\n", level, str);
 }
 
-int main(int argc, char *argv[])
+void main_loop(struct ma_config *config, struct mosquitto *mosq, int sock)
 {
-	int ret, sock;
-	struct sockaddr_nl group_addr;
-	struct nlmsghdr *hdr;
 	uint8_t buf[4096];
-	ssize_t received;
+	uint8_t *data;
+	struct nlmsghdr *hdr;
 	struct ndmsg *nd;
 	struct nlattr *attr;
-	uint8_t *data;
+	ssize_t received;
 	time_t t;
-	struct mosquitto *mosq;
-
-	bzero(&group_addr, sizeof(group_addr));
-	group_addr.nl_family = AF_NETLINK;
-	group_addr.nl_pid = getpid();
-	group_addr.nl_groups = RTMGRP_NEIGH;
-
-	sock = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
-	if (sock < 0) {
-		perror("Couldn't open netlink socket");
-		exit(EXIT_FAILURE);
-	}
-
-	if (bind(sock, (struct sockaddr *) &group_addr,
-			sizeof(group_addr)) < 0) {
-		perror("Failed to bind to netlink socket");
-		exit(EXIT_FAILURE);
-	}
-
-	mosquitto_lib_init();
-	mosq = mosquitto_new("mqtt-arp", true, NULL);
-	if (!mosq) {
-		printf("Couldn't allocate mosquitto structure\n");
-		exit(EXIT_FAILURE);
-	}
-
-	mosquitto_log_callback_set(mosq, mosq_log_callback);
-
-	mosquitto_username_pw_set(mosq, MQTT_USERNAME, MQTT_PASSWORD);
-	mosquitto_tls_set(mosq, "/etc/ssl/certs/ca-certificates.crt",
-			NULL, NULL, NULL, NULL);
-
-	ret = mosquitto_connect(mosq, MQTT_HOST, MQTT_PORT, 60);
-	if (ret) {
-		printf("Unable to connect to MQTT server.\n");
-		exit(EXIT_FAILURE);
-	}
-
-	ret = mosquitto_loop_start(mosq);
-	if (ret) {
-		printf("Unable to start Mosquitto loop.\n");
-		exit(EXIT_FAILURE);
-	}
 
 	hdr = (struct nlmsghdr *) buf;
 	nd = (struct ndmsg *) (hdr + 1);
@@ -223,7 +194,8 @@ int main(int argc, char *argv[])
 				data = (((uint8_t *) attr) + 4);
 				if (attr->nla_type == NDA_LLADDR &&
 					nd->ndm_state == NUD_REACHABLE) {
-					mqtt_mac_presence(mosq, data, true);
+					mqtt_mac_presence(config, mosq,
+							data, true);
 				}
 				attr = (struct nlattr *)
 					(((uint8_t *) attr) + attr->nla_len);
@@ -235,6 +207,153 @@ int main(int argc, char *argv[])
 			printf("Unknown message type: %d\n", hdr->nlmsg_type);
 		}
 
-		prune_macs(mosq);
+		prune_macs(config, mosq);
 	}
+
+}
+
+struct mosquitto *mqtt_init(struct ma_config *config)
+{
+	struct mosquitto *mosq;
+	int ret;
+
+	mosquitto_lib_init();
+	mosq = mosquitto_new("mqtt-arp", true, NULL);
+	if (!mosq) {
+		printf("Couldn't allocate mosquitto structure\n");
+		exit(EXIT_FAILURE);
+	}
+
+	mosquitto_log_callback_set(mosq, mosq_log_callback);
+
+	/* DTRT if username is NULL */
+	mosquitto_username_pw_set(mosq,
+			config->mqtt_username,
+			config->mqtt_password);
+	if (config->capath)
+		mosquitto_tls_set(mosq, config->capath,
+				NULL, NULL, NULL, NULL);
+
+	ret = mosquitto_connect(mosq, config->mqtt_host,
+			config->mqtt_port, 60);
+	if (ret) {
+		printf("Unable to connect to MQTT server.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	ret = mosquitto_loop_start(mosq);
+	if (ret) {
+		printf("Unable to start Mosquitto loop.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	return mosq;
+}
+
+int netlink_init(void)
+{
+	int sock;
+	struct sockaddr_nl group_addr;
+
+	bzero(&group_addr, sizeof(group_addr));
+	group_addr.nl_family = AF_NETLINK;
+	group_addr.nl_pid = getpid();
+	group_addr.nl_groups = RTMGRP_NEIGH;
+
+	sock = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+	if (sock < 0) {
+		perror("Couldn't open netlink socket");
+		exit(EXIT_FAILURE);
+	}
+
+	if (bind(sock, (struct sockaddr *) &group_addr,
+			sizeof(group_addr)) < 0) {
+		perror("Failed to bind to netlink socket");
+		exit(EXIT_FAILURE);
+	}
+
+	return sock;
+}
+
+struct option long_options[] = {
+	{ "capath", required_argument, 0, 'c' },
+	{ "host", required_argument, 0, 'h' },
+	{ "location", required_argument, 0, 'l' },
+	{ "mac", required_argument, 0, 'm' },
+	{ "port", required_argument, 0, 'p' },
+	{ "topic", required_argument, 0, 't' },
+	{ "verbose", no_argument, 0, 'v' },
+	{ 0, 0, 0, 0 }
+};
+
+int main(int argc, char *argv[])
+{
+	int sock;
+	struct mosquitto *mosq;
+	struct ma_config config;
+	int option_index = 0;
+	int macs = 0;
+	char c;
+
+	bzero(&config, sizeof(config));
+	config.mqtt_port = MQTT_PORT;
+
+	while (1) {
+		c = getopt_long(argc, argv, "c:h:l:m:p:t:v",
+				long_options, &option_index);
+
+		if (c == -1)
+			break;
+
+		switch (c) {
+		case 'c':
+			config.capath = optarg;
+			break;
+		case 'h':
+			config.mqtt_host = optarg;
+			break;
+		case 'l':
+			config.location = optarg;
+			break;
+		case 'm':
+			if (macs >= MAX_MACS) {
+				printf("Can only accept %d MAC addresses to"
+					" watch for.\n", MAX_MACS);
+				exit(EXIT_FAILURE);
+			}
+			sscanf(optarg,
+				"%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
+				&config.macs[macs].mac[0],
+				&config.macs[macs].mac[1],
+				&config.macs[macs].mac[2],
+				&config.macs[macs].mac[3],
+				&config.macs[macs].mac[4],
+				&config.macs[macs].mac[5]);
+			break;
+		case 'p':
+			config.mqtt_port = atoi(optarg);
+			break;
+		case 't':
+			config.mqtt_topic = optarg;
+			break;
+		case 'v':
+			debug = true;
+			break;
+		default:
+			printf("Unrecognized option: %c\n", c);
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	if (!config.mqtt_host)
+		config.mqtt_host = MQTT_HOST;
+	if (!config.mqtt_topic)
+		config.mqtt_host = MQTT_TOPIC;
+	if (!config.location)
+		config.mqtt_host = LOCATION;
+
+	sock = netlink_init();
+	mosq = mqtt_init(&config);
+
+	main_loop(&config, mosq, sock);
 }
