@@ -329,6 +329,8 @@ int main(int argc, char *argv[])
 				&config.macs[macs].mac[3],
 				&config.macs[macs].mac[4],
 				&config.macs[macs].mac[5]);
+			config.macs[macs].valid = true;
+			macs++;
 			break;
 		case 'p':
 			config.mqtt_port = atoi(optarg);
