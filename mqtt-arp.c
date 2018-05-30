@@ -280,8 +280,10 @@ struct option long_options[] = {
 	{ "host", required_argument, 0, 'h' },
 	{ "location", required_argument, 0, 'l' },
 	{ "mac", required_argument, 0, 'm' },
+	{ "password", required_argument, 0, 'P' },
 	{ "port", required_argument, 0, 'p' },
 	{ "topic", required_argument, 0, 't' },
+	{ "username", required_argument, 0, 'u' },
 	{ "verbose", no_argument, 0, 'v' },
 	{ 0, 0, 0, 0 }
 };
@@ -299,7 +301,7 @@ int main(int argc, char *argv[])
 	config.mqtt_port = MQTT_PORT;
 
 	while (1) {
-		c = getopt_long(argc, argv, "c:h:l:m:p:t:v",
+		c = getopt_long(argc, argv, "c:h:l:m:p:P:t:u:v",
 				long_options, &option_index);
 
 		if (c == -1)
@@ -335,8 +337,14 @@ int main(int argc, char *argv[])
 		case 'p':
 			config.mqtt_port = atoi(optarg);
 			break;
+		case 'P':
+			config.mqtt_password = optarg;
+			break;
 		case 't':
 			config.mqtt_topic = optarg;
+			break;
+		case 'u':
+			config.mqtt_username = optarg;
 			break;
 		case 'v':
 			debug = true;
