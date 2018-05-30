@@ -17,6 +17,7 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 #include <getopt.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -64,6 +65,12 @@ struct ma_config {
 };
 
 bool debug = false;
+bool want_shutdown = false;
+
+void shutdown_request(int signal)
+{
+	want_shutdown = true;
+}
 
 bool mac_compare(uint8_t *a, uint8_t *b)
 {
@@ -167,7 +174,7 @@ void main_loop(struct ma_config *config, struct mosquitto *mosq, int sock)
 
 	hdr = (struct nlmsghdr *) buf;
 	nd = (struct ndmsg *) (hdr + 1);
-	while (1) {
+	while (!want_shutdown) {
 		received = recv(sock, buf, sizeof(buf), 0);
 		if (debug) {
 			t = time(NULL);
@@ -362,8 +369,16 @@ int main(int argc, char *argv[])
 	if (!config.location)
 		config.mqtt_host = LOCATION;
 
+	signal(SIGTERM, shutdown_request);
+
 	sock = netlink_init();
 	mosq = mqtt_init(&config);
 
 	main_loop(&config, mosq, sock);
+
+	mosquitto_disconnect(mosq);
+	mosquitto_loop_stop(mosq, true);
+	mosquitto_destroy(mosq);
+	mosquitto_lib_cleanup();
+	close(sock);
 }
