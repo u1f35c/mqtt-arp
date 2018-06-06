@@ -197,15 +197,15 @@ void main_loop(struct ma_config *config, struct mosquitto *mosq, int sock)
 					nd->ndm_type);
 			}
 			attr = (struct nlattr *) (nd + 1);
-			while (attr->nla_len > 0) {
-				data = (((uint8_t *) attr) + 4);
+			while (((uint8_t *) attr - buf) < hdr->nlmsg_len) {
+				data = (((uint8_t *) attr) + NLA_HDRLEN);
 				if (attr->nla_type == NDA_LLADDR &&
 					nd->ndm_state == NUD_REACHABLE) {
 					mqtt_mac_presence(config, mosq,
 							data, true);
 				}
-				attr = (struct nlattr *)
-					(((uint8_t *) attr) + attr->nla_len);
+				attr = (struct nlattr *) (((uint8_t *) attr) +
+						NLA_ALIGN(attr->nla_len));
 			}
 			break;
 		case RTM_DELNEIGH:
