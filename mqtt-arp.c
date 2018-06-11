@@ -210,6 +210,7 @@ void main_loop(struct ma_config *config, struct mosquitto *mosq, int sock)
 			break;
 		case RTM_DELNEIGH:
 		case RTM_GETNEIGH:
+			break;
 		default:
 			printf("Unknown message type: %d\n", hdr->nlmsg_type);
 		}
