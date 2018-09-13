@@ -366,9 +366,9 @@ int main(int argc, char *argv[])
 	if (!config.mqtt_host)
 		config.mqtt_host = MQTT_HOST;
 	if (!config.mqtt_topic)
-		config.mqtt_host = MQTT_TOPIC;
+		config.mqtt_topic = MQTT_TOPIC;
 	if (!config.location)
-		config.mqtt_host = LOCATION;
+		config.location = LOCATION;
 
 	signal(SIGTERM, shutdown_request);
 
