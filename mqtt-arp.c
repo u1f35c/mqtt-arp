@@ -16,6 +16,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
+#include <ctype.h>
+#include <errno.h>
 #include <getopt.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -38,6 +40,7 @@
 #define MQTT_PORT	8883
 #define MQTT_TOPIC	"location/by-mac"
 #define LOCATION	"home"
+#define CONFIG_FILE	"/etc/mqtt-arp.conf"
 
 /* How often (in seconds) to report that we see a device */
 #define REPORT_INTERVAL	(2 * 60)
@@ -283,6 +286,61 @@ int netlink_init(void)
 	return sock;
 }
 
+int read_config(char *file, struct ma_config *config, int *macs)
+{
+	FILE *f;
+	char line[256];
+	int i;
+
+	f = fopen(file, "r");
+	if (f == NULL)
+		return errno;
+
+#define INT_OPTION(opt, var) \
+	if (strncmp(line, opt " ", sizeof(opt)) == 0) { \
+		var = atoi(&line[sizeof(opt)]);          \
+	}
+#define STRING_OPTION(opt, var) \
+	if (strncmp(line, opt " ", sizeof(opt)) == 0) { \
+		var = strdup(&line[sizeof(opt)]);       \
+	}
+
+	while (fgets(line, sizeof(line), f) != NULL) {
+		for (i = strlen(line) - 1; i >= 0 && isspace(line[i]); i--)
+			line[i] = '\0';
+		if (line[0] == '\0' || line[0] == '#')
+			continue;
+
+		if (strncmp(line, "mac ", 4) == 0) {
+			if (*macs >= MAX_MACS) {
+				printf("Can only accept %d MAC addresses to"
+					" watch for.\n", MAX_MACS);
+				exit(EXIT_FAILURE);
+			}
+			sscanf(&line[4],
+				"%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
+				&config->macs[*macs].mac[0],
+				&config->macs[*macs].mac[1],
+				&config->macs[*macs].mac[2],
+				&config->macs[*macs].mac[3],
+				&config->macs[*macs].mac[4],
+				&config->macs[*macs].mac[5]);
+			config->macs[*macs].valid = true;
+			(*macs)++;
+		} else
+		STRING_OPTION("mqtt_host", config->mqtt_host) else
+		INT_OPTION("mqtt_port", config->mqtt_port) else
+		STRING_OPTION("mqtt_user", config->mqtt_username) else
+		STRING_OPTION("mqtt_pass", config->mqtt_password) else
+		STRING_OPTION("mqtt_topic", config->mqtt_topic) else
+		STRING_OPTION("location", config->location) else
+		STRING_OPTION("capath", config->capath)
+	}
+	fclose(f);
+
+	return 0;
+}
+
 struct option long_options[] = {
 	{ "capath", required_argument, 0, 'c' },
 	{ "host", required_argument, 0, 'h' },
@@ -307,6 +365,9 @@ int main(int argc, char *argv[])
 
 	bzero(&config, sizeof(config));
 	config.mqtt_port = MQTT_PORT;
+
+	/* Read config before parsing command line */
+	read_config(CONFIG_FILE, &config, &macs);
 
 	while (1) {
 		c = getopt_long(argc, argv, "c:h:l:m:p:P:t:u:v",
