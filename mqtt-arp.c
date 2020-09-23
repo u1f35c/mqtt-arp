@@ -361,7 +361,7 @@ int main(int argc, char *argv[])
 	struct ma_config config;
 	int option_index = 0;
 	int macs = 0;
-	char c;
+	int c;
 
 	bzero(&config, sizeof(config));
 	config.mqtt_port = MQTT_PORT;
