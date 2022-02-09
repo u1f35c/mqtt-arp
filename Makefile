@@ -1,6 +1,6 @@
-CC = gcc
-CFLAGS = -Wall
-LDFLAGS =
+CC ?= gcc
+CFLAGS ?= -Wall
+LDFLAGS ?=
 
 all: mqtt-arp
 
