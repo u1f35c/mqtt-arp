@@ -1,0 +1,22 @@
+Source: mqtt-arp
+Section: net
+Priority: optional
+Maintainer: Jonathan McDowell <noodles@earth.li>
+Build-Depends: debhelper-compat (= 13),
+	libmosquitto-dev
+Standards-Version: 4.5.1
+Homepage: https://github.com/u1f35c/mqtt-arp
+Rules-Requires-Root: no
+
+Package: mqtt-arp
+Architecture: any
+Multi-Arch: foreign
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Description: Simple tool to watch for ARP presence and report using MQTT
+ mqtt-arp is an imaginatively named program that uses the Linux kernel netlink
+ interface to watch for details of hosts making ARP requests. It uses these
+ requests to determine if a device is present and report that information via
+ MQTT.
+ .
+ It can, for example, be used with Home Assistant to provide details of
+ detected wifi devices for use with presence decisions.

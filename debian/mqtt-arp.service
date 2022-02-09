@@ -1,0 +1,20 @@
+[Unit]
+Description=MQTT ARP watcher
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/mqtt-arp
+Restart=on-failure
+PrivateTmp=true
+ProtectSystem=full
+NoNewPrivileges=true
+PrivateDevices=true
+MemoryDenyWriteExecute=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictNamespaces=true
+
+[Install]
+WantedBy=multi-user.target
