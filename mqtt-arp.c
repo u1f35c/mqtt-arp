@@ -293,8 +293,10 @@ int read_config(char *file, struct ma_config *config, int *macs)
 	int i;
 
 	f = fopen(file, "r");
-	if (f == NULL)
+	if (f == NULL) {
+		printf("Could not read config file %s\n", file);
 		return errno;
+	}
 
 #define INT_OPTION(opt, var) \
 	if (strncmp(line, opt " ", sizeof(opt)) == 0) { \
