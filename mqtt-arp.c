@@ -370,6 +370,7 @@ int main(int argc, char *argv[])
 	bzero(&config, sizeof(config));
 	config.mqtt_port = MQTT_PORT;
 
+	opterr = 0;
 	while (1) {
 		c = getopt_long(argc, argv, "f:", long_options, &option_index);
 		if (c == -1)
@@ -379,17 +380,19 @@ int main(int argc, char *argv[])
 			break;
 		}
 	}
-
 	read_config(config_file, &config, &macs);
 
+	optind = 0;
+	option_index = 0;
 	while (1) {
-		c = getopt_long(argc, argv, "c:h:l:m:p:P:t:u:v",
+		c = getopt_long(argc, argv, "c:h:l:m:p:P:t:u:f:v",
 				long_options, &option_index);
 
 		if (c == -1)
 			break;
-
 		switch (c) {
+		case 'f':
+			continue;
 		case 'c':
 			config.capath = optarg;
 			break;
