@@ -351,6 +351,7 @@ struct option long_options[] = {
 	{ "topic", required_argument, 0, 't' },
 	{ "username", required_argument, 0, 'u' },
 	{ "verbose", no_argument, 0, 'v' },
+	{ "configfile", required_argument, 0, 'f' },
 	{ 0, 0, 0, 0 }
 };
 
@@ -362,12 +363,22 @@ int main(int argc, char *argv[])
 	int option_index = 0;
 	int macs = 0;
 	int c;
+	char *config_file = CONFIG_FILE;
 
 	bzero(&config, sizeof(config));
 	config.mqtt_port = MQTT_PORT;
 
-	/* Read config before parsing command line */
-	read_config(CONFIG_FILE, &config, &macs);
+	while (1) {
+		c = getopt_long(argc, argv, "f:", long_options, &option_index);
+		if (c == -1)
+			break;
+		if (c == 'f') {
+			config_file = optarg;
+			break;
+		}
+	}
+
+	read_config(config_file, &config, &macs);
 
 	while (1) {
 		c = getopt_long(argc, argv, "c:h:l:m:p:P:t:u:v",
