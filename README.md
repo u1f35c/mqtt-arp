@@ -2,7 +2,8 @@
 
 Rather than reporting all MAC addresses seen ```mqtt-arp``` takes a list of MACs to watch for. I have this configured for my phone, resulting in a reasonable proxy for whether I am home or not. ```mqtt-arp``` will report as soon as the device is seen, and send rate-limited (at most once every 2 minutes) updates when it is seen again. If the device is not seen for at least 10 minutes the location will be reported as "unknown".
 
-There is basic configuration file support; by default ```mqtt-arp``` will read ```/etc/mqtt-arp.conf```. The following aspects can be configured at run time:
+There is basic configuration file support; by default ```mqtt-arp``` will read ```/etc/mqtt-arp.conf```. The location can be overridable, see below. 
+The following aspects can be configured at run time:
 
  * MQTT host (-h / --host / mqtt_host)
  * MQTT post (-p / --port / mqtt_port)
@@ -12,5 +13,6 @@ There is basic configuration file support; by default ```mqtt-arp``` will read `
  * Location to report when device is present (-l / --location / location)
  * Path to SSL certificate bundle (-c / --capath / capath)
  * MAC addresses to watch for  (-m / --mac / mac)
+ * Read config file at specific location (-f / --configfile / file path)
 
 This code is released as GPLv3+ and is available at [https://the.earth.li/gitweb/?p=mqtt-arp.git;a=summary](https://the.earth.li/gitweb/?p=mqtt-arp.git;a=summary) or on GitHub for easy whatever at [https://github.com/u1f35c/mqtt-arp](https://github.com/u1f35c/mqtt-arp)
