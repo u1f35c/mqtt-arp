@@ -294,7 +294,7 @@ int read_config(char *file, struct ma_config *config, int *macs)
 
 	f = fopen(file, "r");
 	if (f == NULL) {
-		printf("Could not read config file %s\n", file);
+		fprintf(stderr, "Could not read config file %s\n", file);
 		return errno;
 	}
 
@@ -343,6 +343,61 @@ int read_config(char *file, struct ma_config *config, int *macs)
 	return 0;
 }
 
+void override_config(const struct ma_config *source, struct ma_config *target) {
+    if(source->mqtt_host != NULL) {
+        target->mqtt_host = source->mqtt_host;
+    }
+    if(source->mqtt_port != 0) {
+        target->mqtt_port = source->mqtt_port;
+    }
+    if(source->mqtt_username != NULL) {
+        target->mqtt_username = source->mqtt_username;
+    }
+    if(source->mqtt_password != NULL) {
+        target->mqtt_password = source->mqtt_password;
+    }
+    if(source->mqtt_topic != NULL) {
+        target->mqtt_topic = source->mqtt_topic;
+    }
+    if(source->location != NULL) {
+        target->location = source->location;
+    }
+    if(source->capath != NULL) {
+        target->capath = source->capath;
+    }
+    for(int i = 0; i < MAX_MACS; ++i) {
+        if(source->macs[i].valid) {
+            memcpy(&target->macs[i], &source->macs[i], sizeof(struct mac_entry));
+        }
+    }
+}
+
+void print_config(const struct ma_config *config) {
+    printf("Config:\n");
+    printf("mqtt_host: %s\n", config->mqtt_host ? config->mqtt_host : "NULL");
+    printf("mqtt_port: %d\n", config->mqtt_port);
+    printf("mqtt_username: %s\n", config->mqtt_username ? config->mqtt_username : "NULL");
+    printf("mqtt_password: %s\n", config->mqtt_password ? config->mqtt_password : "NULL");
+    printf("mqtt_topic: %s\n", config->mqtt_topic ? config->mqtt_topic : "NULL");
+    printf("location: %s\n", config->location ? config->location : "NULL");
+    printf("capath: %s\n", config->capath ? config->capath : "NULL");
+    for(int i = 0; i < MAX_MACS; ++i) {
+        if(config->macs[i].valid) {
+            printf("macs[%d]: { valid: true, mac: ", i);
+            for(int j = 0; j < 6; ++j) {
+                printf("%02x", config->macs[i].mac[j]);
+                if(j < 5) {
+                    printf(":");
+                }
+            }
+            printf("\n");
+        }
+        else {
+            printf("macs[%d]: { valid: false }\n", i);
+        }
+    }
+}
+
 struct option long_options[] = {
 	{ "capath", required_argument, 0, 'c' },
 	{ "host", required_argument, 0, 'h' },
@@ -362,28 +417,16 @@ int main(int argc, char *argv[])
 	int sock;
 	struct mosquitto *mosq;
 	struct ma_config config;
+	struct ma_config cmdline_config;
 	int option_index = 0;
 	int macs = 0;
 	int c;
 	char *config_file = CONFIG_FILE;
 
 	bzero(&config, sizeof(config));
+	bzero(&cmdline_config, sizeof(cmdline_config));
 	config.mqtt_port = MQTT_PORT;
 
-	opterr = 0;
-	while (1) {
-		c = getopt_long(argc, argv, "f:", long_options, &option_index);
-		if (c == -1)
-			break;
-		if (c == 'f') {
-			config_file = optarg;
-			break;
-		}
-	}
-	read_config(config_file, &config, &macs);
-
-	optind = 0;
-	option_index = 0;
 	while (1) {
 		c = getopt_long(argc, argv, "c:h:l:m:p:P:t:u:f:v",
 				long_options, &option_index);
@@ -392,15 +435,16 @@ int main(int argc, char *argv[])
 			break;
 		switch (c) {
 		case 'f':
-			continue;
+			config_file = optarg;
+			break;
 		case 'c':
-			config.capath = optarg;
+			cmdline_config.capath = optarg;
 			break;
 		case 'h':
-			config.mqtt_host = optarg;
+			cmdline_config.mqtt_host = optarg;
 			break;
 		case 'l':
-			config.location = optarg;
+			cmdline_config.location = optarg;
 			break;
 		case 'm':
 			if (macs >= MAX_MACS) {
@@ -410,26 +454,26 @@ int main(int argc, char *argv[])
 			}
 			sscanf(optarg,
 				"%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
-				&config.macs[macs].mac[0],
-				&config.macs[macs].mac[1],
-				&config.macs[macs].mac[2],
-				&config.macs[macs].mac[3],
-				&config.macs[macs].mac[4],
-				&config.macs[macs].mac[5]);
-			config.macs[macs].valid = true;
+				&cmdline_config.macs[macs].mac[0],
+				&cmdline_config.macs[macs].mac[1],
+				&cmdline_config.macs[macs].mac[2],
+				&cmdline_config.macs[macs].mac[3],
+				&cmdline_config.macs[macs].mac[4],
+				&cmdline_config.macs[macs].mac[5]);
+			cmdline_config.macs[macs].valid = true;
 			macs++;
 			break;
 		case 'p':
-			config.mqtt_port = atoi(optarg);
+			cmdline_config.mqtt_port = atoi(optarg);
 			break;
 		case 'P':
-			config.mqtt_password = optarg;
+			cmdline_config.mqtt_password = optarg;
 			break;
 		case 't':
-			config.mqtt_topic = optarg;
+			cmdline_config.mqtt_topic = optarg;
 			break;
 		case 'u':
-			config.mqtt_username = optarg;
+			cmdline_config.mqtt_username = optarg;
 			break;
 		case 'v':
 			debug = true;
@@ -440,12 +484,19 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	read_config(config_file, &config, &macs);
+
+	override_config(&cmdline_config, &config);
+
 	if (!config.mqtt_host)
 		config.mqtt_host = MQTT_HOST;
 	if (!config.mqtt_topic)
 		config.mqtt_topic = MQTT_TOPIC;
 	if (!config.location)
 		config.location = LOCATION;
+
+	if (debug)
+		print_config(&config);
 
 	signal(SIGTERM, shutdown_request);
 
